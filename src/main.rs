@@ -1,7 +1,7 @@
 use std::{fs::read_to_string, io};
 
 use clap::Parser;
-use eyre::{bail, eyre, Context};
+use eyre::{eyre, Context};
 use mlua::{Lua, LuaSerdeExt};
 use serde_yaml as yaml;
 use yaml_front_matter::YamlFrontMatter;
