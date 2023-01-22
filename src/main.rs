@@ -85,9 +85,18 @@ mod test {
     ---
     "#;
 
+    const EXAMPLE_NO_YFM: &'_ str = "";
+
     #[test]
     fn can_fix() -> eyre::Result<()> {
         fix(EXAMPLE)?;
         Ok(())
+    }
+
+    #[test]
+    #[allow(unused_must_use)]
+    fn cant_fix() {
+        fix(EXAMPLE_NO_YFM)
+            .expect_err("remove this test once this supports files with no frontmatter");
     }
 }
