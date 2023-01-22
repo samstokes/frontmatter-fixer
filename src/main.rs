@@ -25,6 +25,14 @@ fn process(path: &str) -> eyre::Result<()> {
     let content = read_to_string(path).context("couldn't read file contents")?;
     dbg!(&content);
 
+    let fixed_metadata = fix(&content)?;
+
+    println!("{}", serde_yaml::to_string(&fixed_metadata)?);
+
+    Ok(())
+}
+
+fn fix(content: &str) -> eyre::Result<YValue> {
     // TODO handle files without frontmatter (stop using yaml_front_matter crate?)
     let yaml_front_matter::Document { metadata, content } =
         YamlFrontMatter::parse::<YValue>(&content)
@@ -63,9 +71,23 @@ fn process(path: &str) -> eyre::Result<()> {
     let altered_metadata: YValue = lua
         .from_value(altered_lua_metadata)
         .context("couldn't convert metadata back from Lua representation")?;
-
     dbg!(&altered_metadata);
-    println!("{}", serde_yaml::to_string(&altered_metadata)?);
+    Ok(altered_metadata)
+}
 
-    Ok(())
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    const EXAMPLE: &'_ str = r#"
+    ---
+    tags: [foo, bar]
+    ---
+    "#;
+
+    #[test]
+    fn can_fix() -> eyre::Result<()> {
+        fix(EXAMPLE)?;
+        Ok(())
+    }
 }
