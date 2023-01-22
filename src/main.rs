@@ -1,15 +1,19 @@
-use std::{env::args, fs::read_to_string};
+use std::fs::read_to_string;
 
+use clap::Parser;
 use eyre::{eyre, Context};
 use mlua::{Lua, LuaSerdeExt};
 use serde_yaml as yaml;
 use yaml_front_matter::YamlFrontMatter;
 
-fn main() -> eyre::Result<()> {
-    let paths = args().skip(1);
+#[derive(Debug, Parser)]
+struct Config {
+    paths: Vec<String>,
+}
 
-    let paths = paths.collect::<Vec<_>>();
-    dbg!(&paths);
+fn main() -> eyre::Result<()> {
+    let cfg = Config::parse();
+    dbg!(&cfg);
 
     let processor = Processor::new(
         r#"
@@ -25,7 +29,7 @@ fn main() -> eyre::Result<()> {
     )
     .context("couldn't create processor")?;
 
-    for path in paths {
+    for path in cfg.paths {
         // TODO collect process errors
         processor.process(&path).context("couldn't process file")?;
     }
