@@ -6,32 +6,43 @@ use mlua::{Lua, LuaSerdeExt};
 use serde_yaml as yaml;
 use yaml_front_matter::YamlFrontMatter;
 
+/// Run a Lua script to fix your frontmatter
 #[derive(Debug, Parser)]
 struct Config {
+    /// Pass a short Lua script to run
+    #[arg(short = 'e', long = "eval")]
+    inline_script: Option<String>,
+    /// Read a Lua script from a file
+    #[arg(short = 'f', long = "script")]
+    script_path: Option<String>,
+
+    /// Supply the files to fix as positional arguments
     paths: Vec<String>,
+}
+
+impl Config {
+    fn script(&self) -> eyre::Result<String> {
+        match (&self.inline_script, &self.script_path) {
+            (Some(_), Some(_)) => Err(eyre!("can't specify both inline script and a script file")),
+            (None, None) => Err(eyre!("must specify either inline script or a script file")),
+            (Some(inline_script), _) => Ok(inline_script.clone()),
+            (_, Some(script_path)) => read_to_string(&script_path)
+                .context(format!("couldn't read script file {}", &script_path)),
+        }
+    }
 }
 
 fn main() -> eyre::Result<()> {
     let cfg = Config::parse();
     dbg!(&cfg);
 
-    let processor = Processor::new(
-        r#"
-        print(meta.hello)
-        meta.fish = 'bicycle'
-        for i, tag in pairs(meta.tags) do
-            local stripped_tag = string.gsub(tag, '%s*(%g*)%s*', '%1')
-            print(stripped_tag)
-            meta.tags[i] = stripped_tag
-        end
-        meta.tags = table.concat(meta.tags, ' ')
-    "#,
-    )
-    .context("couldn't create processor")?;
+    let processor = Processor::new(&cfg.script()?).context("couldn't create processor")?;
 
     for path in cfg.paths {
         // TODO collect process errors
-        processor.process(&path).context("couldn't process file")?;
+        processor
+            .process(&path)
+            .context(format!("couldn't process file {}", &path))?;
     }
 
     Ok(())
