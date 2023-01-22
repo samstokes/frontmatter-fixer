@@ -25,6 +25,7 @@ fn process(path: &str) -> eyre::Result<()> {
     let content = read_to_string(path).context("couldn't read file contents")?;
     dbg!(&content);
 
+    // TODO handle files without frontmatter (stop using yaml_front_matter crate?)
     let yaml_front_matter::Document { metadata, content } =
         YamlFrontMatter::parse::<YValue>(&content)
             .map_err(|e| eyre!("{}", e))
