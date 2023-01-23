@@ -1,7 +1,7 @@
 use std::{fs::read_to_string, io};
 
 use clap::Parser;
-use eyre::{eyre, Context};
+use eyre::{bail, eyre, Context};
 use mlua::{Lua, LuaSerdeExt};
 use serde_yaml as yaml;
 use yaml_front_matter::YamlFrontMatter;
@@ -18,6 +18,9 @@ struct Config {
     /// Run a Lua REPL
     #[arg(short = 'r', long = "repl")]
     repl: bool,
+    /// Don't modify any files, just run script and show what would be done
+    #[arg(short = 'n', long = "dry-run")]
+    dry_run: bool,
 
     /// Supply the files to fix as positional arguments
     #[arg(id = "FILES")]
@@ -46,25 +49,43 @@ fn main() -> eyre::Result<()> {
     let cfg = Config::parse();
     dbg!(&cfg);
 
-    let processor =
-        Processor::new(cfg.script()?.as_deref()).context("couldn't create processor")?;
+    let fixer = Fixer::new(cfg.script()?.as_deref()).context("couldn't setup")?;
 
     for path in cfg.paths {
         // TODO collect process errors
-        processor
-            .process(&path)
-            .context(format!("couldn't process file {}", &path))?;
+        process(&fixer, &path, cfg.dry_run).context(format!("couldn't process file {}", &path))?;
     }
 
     Ok(())
 }
 
-struct Processor {
+fn process(fixer: &Fixer, path: &str, dry_run: bool) -> eyre::Result<()> {
+    dbg!(path);
+
+    let content = read_to_string(path).context("couldn't read file contents")?;
+    dbg!(&content);
+
+    let (fixed_metadata, content) = fixer.fix(&content)?;
+
+    if dry_run {
+        println!("---");
+        println!("{}", serde_yaml::to_string(&fixed_metadata)?);
+        println!("---");
+        println!("{}", content);
+    } else {
+        // TODO actually modify file instead of just printing frontmatter
+        bail!("non-dry-run not yet implemented");
+    }
+
+    Ok(())
+}
+
+struct Fixer {
     lua: Lua,
     script: Option<String>,
 }
 
-impl Processor {
+impl Fixer {
     fn new(script: Option<&str>) -> eyre::Result<Self> {
         let lua = Lua::new();
 
@@ -87,23 +108,6 @@ impl Processor {
             lua,
             script: script.map(|s| s.to_owned()),
         })
-    }
-
-    fn process(&self, path: &str) -> eyre::Result<()> {
-        dbg!(path);
-
-        let content = read_to_string(path).context("couldn't read file contents")?;
-        dbg!(&content);
-
-        let (fixed_metadata, content) = self.fix(&content)?;
-
-        // TODO actually modify file instead of just printing frontmatter
-        println!("---");
-        println!("{}", serde_yaml::to_string(&fixed_metadata)?);
-        println!("---");
-        println!("{}", content);
-
-        Ok(())
     }
 
     fn fix(&self, content: &str) -> eyre::Result<(yaml::Value, String)> {
@@ -188,7 +192,7 @@ mod test {
 
     #[test]
     fn empty_script_returns_frontmatter() -> eyre::Result<()> {
-        let processor = Processor::new(Some(""))?;
+        let processor = Fixer::new(Some(""))?;
         let (yfm, _) = processor.fix(EXAMPLE)?;
         assert_eq!("hello: world\n", yaml::to_string(&yfm)?);
         Ok(())
@@ -196,7 +200,7 @@ mod test {
 
     #[test]
     fn passes_through_content() -> eyre::Result<()> {
-        let processor = Processor::new(Some(""))?;
+        let processor = Fixer::new(Some(""))?;
         let (_, content) = processor.fix(EXAMPLE)?;
         assert_eq!("# Title", content.trim());
         Ok(())
@@ -204,7 +208,7 @@ mod test {
 
     #[test]
     fn script_can_access_and_modify_frontmatter() -> eyre::Result<()> {
-        let processor = Processor::new(Some(
+        let processor = Fixer::new(Some(
             r#"
             meta.hello = meta.hello .. 'fish'
         "#,
@@ -216,7 +220,7 @@ mod test {
 
     #[test]
     fn script_can_access_content() -> eyre::Result<()> {
-        let processor = Processor::new(Some(
+        let processor = Fixer::new(Some(
             r#"
             meta.hello = string.match(content, '# ([^%c]*)')
         "#,
@@ -229,7 +233,7 @@ mod test {
     #[test]
     fn script_cannot_modify_content() {
         let processor =
-            Processor::new(Some("content.fudge = 'vanilla'")).expect("script is valid, but...");
+            Fixer::new(Some("content.fudge = 'vanilla'")).expect("script is valid, but...");
         let _ = processor
             .fix(EXAMPLE)
             .expect_err("content shouldn't be mutable");
@@ -237,7 +241,7 @@ mod test {
 
     #[test]
     fn script_cannot_replace_content() -> eyre::Result<()> {
-        let processor = Processor::new(Some("content = 'vanilla'"))?;
+        let processor = Fixer::new(Some("content = 'vanilla'"))?;
         let (_, content) = processor.fix(EXAMPLE)?;
         assert_eq!("# Title", content.trim());
         Ok(())
@@ -245,7 +249,7 @@ mod test {
 
     #[test]
     fn blows_up_if_no_frontmatter() {
-        let processor = Processor::new(Some(r#""#)).unwrap();
+        let processor = Fixer::new(Some(r#""#)).unwrap();
         let _ = processor
             .fix(EXAMPLE_NO_YFM)
             .expect_err("remove this test once this supports files with no frontmatter");
