@@ -119,6 +119,9 @@ impl Processor {
         globals
             .set("meta", lua_metadata)
             .context("couldn't send metadata to Lua")?;
+        globals
+            .set("content", content.as_str())
+            .context("couldn't send content to Lua")?;
 
         if let Some(script) = &self.script {
             self.lua
