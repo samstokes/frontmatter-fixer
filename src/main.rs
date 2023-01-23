@@ -95,15 +95,18 @@ impl Processor {
         let content = read_to_string(path).context("couldn't read file contents")?;
         dbg!(&content);
 
-        let fixed_metadata = self.fix(&content)?;
+        let (fixed_metadata, content) = self.fix(&content)?;
 
         // TODO actually modify file instead of just printing frontmatter
+        println!("---");
         println!("{}", serde_yaml::to_string(&fixed_metadata)?);
+        println!("---");
+        println!("{}", content);
 
         Ok(())
     }
 
-    fn fix(&self, content: &str) -> eyre::Result<yaml::Value> {
+    fn fix(&self, content: &str) -> eyre::Result<(yaml::Value, String)> {
         // TODO handle files without frontmatter (stop using yaml_front_matter crate?)
         let yaml_front_matter::Document { metadata, content } =
             YamlFrontMatter::parse::<yaml::Value>(&content)
@@ -152,7 +155,8 @@ impl Processor {
             .from_value(altered_lua_metadata)
             .context("couldn't convert metadata back from Lua representation")?;
         dbg!(&altered_metadata);
-        Ok(altered_metadata)
+
+        Ok((altered_metadata, content))
     }
 }
 
@@ -185,8 +189,16 @@ mod test {
     #[test]
     fn empty_script_returns_frontmatter() -> eyre::Result<()> {
         let processor = Processor::new(Some(""))?;
-        let fixed = processor.fix(EXAMPLE)?;
-        assert_eq!("hello: world\n", yaml::to_string(&fixed)?);
+        let (yfm, _) = processor.fix(EXAMPLE)?;
+        assert_eq!("hello: world\n", yaml::to_string(&yfm)?);
+        Ok(())
+    }
+
+    #[test]
+    fn passes_through_content() -> eyre::Result<()> {
+        let processor = Processor::new(Some(""))?;
+        let (_, content) = processor.fix(EXAMPLE)?;
+        assert_eq!("# Title", content.trim());
         Ok(())
     }
 
@@ -197,7 +209,7 @@ mod test {
             meta.hello = meta.hello .. 'fish'
         "#,
         ))?;
-        let fixed = processor.fix(EXAMPLE)?;
+        let (fixed, _) = processor.fix(EXAMPLE)?;
         assert_eq!("hello: worldfish\n", yaml::to_string(&fixed)?);
         Ok(())
     }
@@ -209,16 +221,32 @@ mod test {
             meta.hello = string.match(content, '# ([^%c]*)')
         "#,
         ))?;
-        let fixed = processor.fix(EXAMPLE)?;
+        let (fixed, _) = processor.fix(EXAMPLE)?;
         assert_eq!("hello: Title\n", yaml::to_string(&fixed)?);
         Ok(())
     }
 
     #[test]
-    #[allow(unused_must_use)]
-    fn cant_fix() {
+    fn script_cannot_modify_content() {
+        let processor =
+            Processor::new(Some("content.fudge = 'vanilla'")).expect("script is valid, but...");
+        let _ = processor
+            .fix(EXAMPLE)
+            .expect_err("content shouldn't be mutable");
+    }
+
+    #[test]
+    fn script_cannot_replace_content() -> eyre::Result<()> {
+        let processor = Processor::new(Some("content = 'vanilla'"))?;
+        let (_, content) = processor.fix(EXAMPLE)?;
+        assert_eq!("# Title", content.trim());
+        Ok(())
+    }
+
+    #[test]
+    fn blows_up_if_no_frontmatter() {
         let processor = Processor::new(Some(r#""#)).unwrap();
-        processor
+        let _ = processor
             .fix(EXAMPLE_NO_YFM)
             .expect_err("remove this test once this supports files with no frontmatter");
     }
