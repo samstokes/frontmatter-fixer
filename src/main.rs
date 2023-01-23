@@ -176,15 +176,40 @@ mod test {
     ---
     hello: world
     ---
+    # Title
     "#;
 
     const EXAMPLE_NO_YFM: &'_ str = "";
 
     #[test]
-    fn can_fix() -> eyre::Result<()> {
-        let processor = Processor::new(Some(r#"meta.hello = meta.hello .. 'fish'"#))?;
+    fn empty_script_returns_frontmatter() -> eyre::Result<()> {
+        let processor = Processor::new(Some(""))?;
+        let fixed = processor.fix(EXAMPLE)?;
+        assert_eq!("hello: world\n", yaml::to_string(&fixed)?);
+        Ok(())
+    }
+
+    #[test]
+    fn script_can_access_and_modify_frontmatter() -> eyre::Result<()> {
+        let processor = Processor::new(Some(
+            r#"
+            meta.hello = meta.hello .. 'fish'
+        "#,
+        ))?;
         let fixed = processor.fix(EXAMPLE)?;
         assert_eq!("hello: worldfish\n", yaml::to_string(&fixed)?);
+        Ok(())
+    }
+
+    #[test]
+    fn script_can_access_content() -> eyre::Result<()> {
+        let processor = Processor::new(Some(
+            r#"
+            meta.hello = string.match(content, '# ([^%c]*)')
+        "#,
+        ))?;
+        let fixed = processor.fix(EXAMPLE)?;
+        assert_eq!("hello: Title\n", yaml::to_string(&fixed)?);
         Ok(())
     }
 
