@@ -13,13 +13,14 @@ struct Config {
     #[arg(short = 'e', long = "eval")]
     inline_script: Option<String>,
     /// Read a Lua script from a file
-    #[arg(short = 'f', long = "script")]
+    #[arg(short = 'f', long = "script", id = "SCRIPT_FILE")]
     script_path: Option<String>,
     /// Run a Lua REPL
     #[arg(short = 'r', long = "repl")]
     repl: bool,
 
     /// Supply the files to fix as positional arguments
+    #[arg(id = "FILES")]
     paths: Vec<String>,
 }
 
