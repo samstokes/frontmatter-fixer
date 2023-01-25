@@ -47,7 +47,6 @@ impl Config {
 
 fn main() -> eyre::Result<()> {
     let cfg = Config::parse();
-    dbg!(&cfg);
 
     let fixer = Fixer::new(cfg.script()?.as_deref()).context("couldn't setup")?;
 
@@ -60,10 +59,7 @@ fn main() -> eyre::Result<()> {
 }
 
 fn process(fixer: &Fixer, path: &str, dry_run: bool) -> eyre::Result<()> {
-    dbg!(path);
-
     let content = read_to_string(path).context("couldn't read file contents")?;
-    dbg!(&content);
 
     let (fixed_metadata, content) = fixer.fix(&content)?;
 
@@ -120,8 +116,6 @@ impl Fixer {
             YamlFrontMatter::parse::<yaml::Value>(&content)
                 .map_err(|e| eyre!("{}", e))
                 .context("couldn't parse frontmatter")?;
-        dbg!(&metadata);
-        dbg!(&content);
 
         let globals = self.lua.globals();
         let lua_metadata = self
@@ -163,7 +157,6 @@ impl Fixer {
             .lua
             .from_value(altered_lua_metadata)
             .context("couldn't convert metadata back from Lua representation")?;
-        dbg!(&altered_metadata);
 
         Ok((altered_metadata, content))
     }
