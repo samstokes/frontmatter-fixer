@@ -2,7 +2,7 @@ use std::{fs::read_to_string, io};
 
 use clap::Parser;
 use eyre::{bail, eyre, Context};
-use mlua::{Lua, LuaSerdeExt};
+use mlua::{Function, Lua, LuaSerdeExt, RegistryKey};
 use serde_yaml as yaml;
 use yaml_front_matter::YamlFrontMatter;
 
@@ -82,20 +82,12 @@ fn process(fixer: &Fixer, path: &str, dry_run: bool) -> eyre::Result<()> {
 
 struct Fixer {
     lua: Lua,
-    script: Option<String>,
+    script: Option<RegistryKey>,
 }
 
 impl Fixer {
     fn new(script: Option<&str>) -> eyre::Result<Self> {
         let lua = Lua::new();
-
-        if let Some(script) = script {
-            let fun = lua
-                .load(script)
-                .into_function()
-                .context("lua script didn't compile")?;
-            dbg!(fun);
-        }
 
         let dump_fun = lua
             .create_function(lua_yaml_dump)
@@ -104,9 +96,21 @@ impl Fixer {
             .set("yaml_dump", dump_fun)
             .context("couldn't register yaml_dump function")?;
 
+        let script_fun = script
+            .map(|s| {
+                lua.load(s)
+                    .into_function()
+                    .context("lua script didn't compile")
+            })
+            .transpose()?
+            .map(|fun| {
+                lua.create_registry_value(fun)
+                    .expect("couldn't save precompiled script")
+            });
+
         Ok(Self {
             lua,
-            script: script.map(|s| s.to_owned()),
+            script: script_fun,
         })
     }
 
@@ -132,10 +136,11 @@ impl Fixer {
             .context("couldn't send content to Lua")?;
 
         if let Some(script) = &self.script {
-            self.lua
-                .load(script)
-                .exec()
-                .context("error in Lua script")?;
+            let script_fun: Function = self
+                .lua
+                .registry_value(script)
+                .expect("couldn't retrieve precompiled script");
+            let _ = script_fun.call(()).context("error in Lua script")?;
         } else {
             let mut input = String::new();
             let stdin = io::stdin();
