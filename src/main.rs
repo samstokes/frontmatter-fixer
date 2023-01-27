@@ -6,7 +6,6 @@ use clap::Parser;
 use eyre::{bail, eyre, Context};
 use mlua::{Function, Lua, LuaSerdeExt, RegistryKey};
 use serde_yaml as yaml;
-use yaml_front_matter::YamlFrontMatter;
 
 /// Run a Lua script to fix your frontmatter
 #[derive(Debug, Parser)]
@@ -112,23 +111,27 @@ impl Fixer {
         })
     }
 
-    fn fix(&self, content: &str) -> eyre::Result<(yaml::Value, String)> {
-        // TODO handle files without frontmatter (stop using yaml_front_matter crate?)
-        let yaml_front_matter::Document { metadata, content } =
-            YamlFrontMatter::parse::<yaml::Value>(&content)
-                .map_err(|e| eyre!("{}", e))
-                .context("couldn't parse frontmatter")?;
+    fn fix<'this, 'doc>(&'this self, content: &'doc str) -> eyre::Result<(yaml::Value, &'doc str)> {
+        let (metadata, content) = frontmatter::parse(content);
 
         let globals = self.lua.globals();
-        let lua_metadata = self
-            .lua
-            .to_value(&metadata)
-            .context("couldn't convert metadata to Lua representation")?;
+        if let Some(metadata) = metadata {
+            let metadata = metadata.context("couldn't parse frontmatter")?;
+            let lua_metadata = self
+                .lua
+                .to_value(&metadata)
+                .context("couldn't convert metadata to Lua representation")?;
+            globals
+                .set("meta", lua_metadata)
+                .context("couldn't send metadata to Lua")?;
+        } else {
+            // overwrite from last time (TODO just use fresh scope)
+            globals
+                .raw_remove("meta")
+                .context("couldn't clear Lua metadata")?;
+        }
         globals
-            .set("meta", lua_metadata)
-            .context("couldn't send metadata to Lua")?;
-        globals
-            .set("content", content.as_str())
+            .set("content", content)
             .context("couldn't send content to Lua")?;
 
         if let Some(script) = &self.script {
@@ -181,14 +184,20 @@ fn lua_yaml_dump(lua: &Lua, v: mlua::Value) -> mlua::Result<()> {
 mod test {
     use super::*;
 
-    const EXAMPLE: &'_ str = r#"
+    const EXAMPLE: &'_ str = "\
     ---
     hello: world
     ---
     # Title
-    "#;
+    ";
 
-    const EXAMPLE_NO_YFM: &'_ str = "";
+    const EXAMPLE_EMPTY_YFM: &'_ str = "\
+    ---
+    ---
+    # Title
+    ";
+
+    const EXAMPLE_NO_YFM: &'_ str = "# Title\n";
 
     #[test]
     fn empty_script_returns_frontmatter() -> eyre::Result<()> {
@@ -248,10 +257,27 @@ mod test {
     }
 
     #[test]
-    fn blows_up_if_no_frontmatter() {
-        let processor = Fixer::new(Some(r#""#)).unwrap();
+    fn passes_through_content_if_no_frontmatter() -> eyre::Result<()> {
+        let processor = Fixer::new(Some("")).unwrap();
+        let (yfm, content) = processor.fix(EXAMPLE_NO_YFM)?;
+        assert_eq!("null\n", yaml::to_string(&yfm)?);
+        assert_eq!("# Title", content.trim());
+        Ok(())
+    }
+
+    #[test]
+    fn blows_up_if_empty_frontmatter() {
+        let processor = Fixer::new(Some("")).unwrap();
         let _ = processor
-            .fix(EXAMPLE_NO_YFM)
-            .expect_err("remove this test once this supports files with no frontmatter");
+            .fix(EXAMPLE_EMPTY_YFM)
+            .expect_err("malformed frontmatter should fail");
+    }
+
+    #[test]
+    fn can_create_frontmatter_if_none() -> eyre::Result<()> {
+        let processor = Fixer::new(Some("meta = { hello = 'world' }")).unwrap();
+        let (yfm, _) = processor.fix(EXAMPLE_NO_YFM)?;
+        assert_eq!("hello: world\n", yaml::to_string(&yfm)?);
+        Ok(())
     }
 }
