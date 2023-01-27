@@ -22,6 +22,9 @@ struct Config {
     /// Don't modify any files, just run script and show what would be done
     #[arg(short = 'n', long = "dry-run")]
     dry_run: bool,
+    /// Print each file being processed
+    #[arg(short = 'v', long = "verbose")]
+    verbose: bool,
 
     /// Supply the files to fix as positional arguments
     #[arg(id = "FILES")]
@@ -51,9 +54,36 @@ fn main() -> eyre::Result<()> {
 
     let fixer = Fixer::new(cfg.script()?.as_deref()).context("couldn't setup")?;
 
+    let mut ok_paths: Vec<String> = Vec::new();
+    let mut err_paths: Vec<(String, eyre::Report)> = Vec::new();
+
     for path in cfg.paths {
-        // TODO collect process errors
-        process(&fixer, &path, cfg.dry_run).context(format!("couldn't process file {}", &path))?;
+        match process(&fixer, &path, cfg.dry_run) {
+            Ok(()) => {
+                if cfg.verbose {
+                    eprintln!("would process file {} successfully", &path);
+                }
+                ok_paths.push(path);
+            }
+            Err(e) => {
+                if cfg.verbose {
+                    eprintln!("would fail to process file {}: {:?}", &path, &e);
+                }
+                err_paths.push((path, e));
+            }
+        }
+    }
+
+    eprintln!(
+        "would process {} files total",
+        ok_paths.len() + err_paths.len()
+    );
+    if !err_paths.is_empty() {
+        eprintln!("would process {} files successfully", ok_paths.len());
+        eprintln!("would fail to process {} files", err_paths.len());
+        for (path, err) in err_paths {
+            eprintln!("{}: {:?}", path, err);
+        }
     }
 
     Ok(())
@@ -64,12 +94,7 @@ fn process(fixer: &Fixer, path: &str, dry_run: bool) -> eyre::Result<()> {
 
     let (fixed_metadata, content) = fixer.fix(&content)?;
 
-    if dry_run {
-        println!("---");
-        println!("{}", serde_yaml::to_string(&fixed_metadata)?);
-        println!("---");
-        println!("{}", content);
-    } else {
+    if !dry_run {
         // TODO actually modify file instead of just printing frontmatter
         bail!("non-dry-run not yet implemented");
     }
