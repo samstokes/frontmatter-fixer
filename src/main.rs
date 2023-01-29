@@ -26,9 +26,12 @@ struct Config {
     /// Don't modify any files, just run script and show what would be done
     #[arg(short = 'n', long = "dry-run")]
     dry_run: bool,
-    /// Print each file being processed
+    /// Print the name of each file being processed and its outcome
     #[arg(short = 'v', long = "verbose")]
     verbose: bool,
+    /// Print out the processed result of each file
+    #[arg(short = 'p', long = "print")]
+    print_result: bool,
 
     /// Supply the files to fix as positional arguments
     #[arg(id = "FILES")]
@@ -61,19 +64,28 @@ fn main() -> eyre::Result<()> {
     let mut ok_paths: Vec<String> = Vec::new();
     let mut err_paths: Vec<(String, eyre::Report)> = Vec::new();
 
-    // TODO change logging based on dry run
+    let msg_process = if cfg.dry_run {
+        "would process"
+    } else {
+        "processed"
+    };
+    let msg_fail = if cfg.dry_run {
+        "would fail to process"
+    } else {
+        "failed to process"
+    };
 
     for path in cfg.paths {
-        match process(&fixer, &path, cfg.dry_run) {
+        match process(&fixer, &path, cfg.dry_run, cfg.print_result) {
             Ok(()) => {
                 if cfg.verbose {
-                    eprintln!("would process file {} successfully", &path);
+                    eprintln!("{} file {} successfully", msg_process, &path);
                 }
                 ok_paths.push(path);
             }
             Err(e) => {
                 if cfg.verbose {
-                    eprintln!("would fail to process file {}: {:?}", &path, &e);
+                    eprintln!("{} file {}: {:?}", msg_fail, &path, &e);
                 }
                 err_paths.push((path, e));
             }
@@ -81,12 +93,13 @@ fn main() -> eyre::Result<()> {
     }
 
     eprintln!(
-        "would process {} files total",
+        "{} {} files total",
+        msg_process,
         ok_paths.len() + err_paths.len()
     );
     if !err_paths.is_empty() {
-        eprintln!("would process {} files successfully", ok_paths.len());
-        eprintln!("would fail to process {} files", err_paths.len());
+        eprintln!("{} {} files successfully", msg_process, ok_paths.len());
+        eprintln!("{} {} files:", msg_fail, err_paths.len());
         for (path, err) in err_paths {
             eprintln!("{}: {:?}", path, err);
         }
@@ -95,14 +108,15 @@ fn main() -> eyre::Result<()> {
     Ok(())
 }
 
-fn process(fixer: &Fixer, path: &str, dry_run: bool) -> eyre::Result<()> {
+fn process(fixer: &Fixer, path: &str, dry_run: bool, print_result: bool) -> eyre::Result<()> {
     let content = read_to_string(path).context("couldn't read file contents")?;
 
     let (fixed_metadata, content) = fixer.fix(&content)?;
 
-    if dry_run {
+    if print_result {
         frontmatter::write(stdout(), fixed_metadata.as_ref(), content)?;
-    } else {
+    }
+    if !dry_run {
         modify_file(path, fixed_metadata.as_ref(), content).context("couldn't modify file")?;
     }
 
@@ -171,7 +185,7 @@ impl Fixer {
                 .set("meta", lua_metadata)
                 .context("couldn't send metadata to Lua")?;
         } else {
-            // overwrite from last time (TODO just use fresh scope)
+            // clear out previous file's meta
             globals
                 .raw_remove("meta")
                 .context("couldn't clear Lua metadata")?;
