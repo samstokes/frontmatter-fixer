@@ -136,7 +136,10 @@ impl Fixer {
         })
     }
 
-    fn fix<'this, 'doc>(&'this self, content: &'doc str) -> eyre::Result<(yaml::Value, &'doc str)> {
+    fn fix<'this, 'doc>(
+        &'this self,
+        content: &'doc str,
+    ) -> eyre::Result<(Option<yaml::Value>, &'doc str)> {
         let (metadata, content) = frontmatter::parse(content);
 
         let globals = self.lua.globals();
@@ -183,7 +186,7 @@ impl Fixer {
         let altered_lua_metadata = globals
             .get("meta")
             .context("couldn't retrieve metadata from Lua")?;
-        let altered_metadata: yaml::Value = self
+        let altered_metadata: Option<yaml::Value> = self
             .lua
             .from_value(altered_lua_metadata)
             .context("couldn't convert metadata back from Lua representation")?;
@@ -285,7 +288,7 @@ mod test {
     fn passes_through_content_if_no_frontmatter() -> eyre::Result<()> {
         let processor = Fixer::new(Some("")).unwrap();
         let (yfm, content) = processor.fix(EXAMPLE_NO_YFM)?;
-        assert_eq!("null\n", yaml::to_string(&yfm)?);
+        assert_eq!(None, yfm);
         assert_eq!("# Title", content.trim());
         Ok(())
     }
