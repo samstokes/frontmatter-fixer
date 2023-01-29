@@ -1,11 +1,27 @@
-pub type Result<T> = serde_yaml::Result<T>;
+use eyre::Context;
+use std::io::Write;
 
 const RULE_LENGTH: usize = "---\n".len();
 
-pub fn parse(s: &str) -> (Option<Result<serde_yaml::Value>>, &str) {
+pub fn parse(s: &str) -> (Option<serde_yaml::Result<serde_yaml::Value>>, &str) {
     let (raw_frontmatter, content) = parse_raw(s);
     let frontmatter = raw_frontmatter.map(serde_yaml::from_str);
     (frontmatter, content)
+}
+
+pub fn write<W: Write>(
+    mut writer: W,
+    frontmatter: Option<&serde_yaml::Value>,
+    content: &str,
+) -> eyre::Result<()> {
+    if let Some(frontmatter) = frontmatter {
+        writer.write_all(b"---\n")?;
+        serde_yaml::to_writer(&mut writer, frontmatter)
+            .context("couldn't serialize frontmatter")?;
+        writer.write_all(b"---\n")?;
+    }
+    writer.write_all(content.as_bytes())?;
+    Ok(())
 }
 
 pub fn parse_raw(s: &str) -> (Option<&str>, &str) {

@@ -1,11 +1,15 @@
 mod frontmatter;
 
-use std::{fs::read_to_string, io};
+use std::{
+    fs::read_to_string,
+    io::{self, stdout},
+};
 
 use clap::Parser;
-use eyre::{bail, eyre, Context};
+use eyre::{eyre, Context};
 use mlua::{Function, Lua, LuaSerdeExt, RegistryKey};
 use serde_yaml as yaml;
+use tempfile::NamedTempFile;
 
 /// Run a Lua script to fix your frontmatter
 #[derive(Debug, Parser)]
@@ -57,6 +61,8 @@ fn main() -> eyre::Result<()> {
     let mut ok_paths: Vec<String> = Vec::new();
     let mut err_paths: Vec<(String, eyre::Report)> = Vec::new();
 
+    // TODO change logging based on dry run
+
     for path in cfg.paths {
         match process(&fixer, &path, cfg.dry_run) {
             Ok(()) => {
@@ -94,11 +100,23 @@ fn process(fixer: &Fixer, path: &str, dry_run: bool) -> eyre::Result<()> {
 
     let (fixed_metadata, content) = fixer.fix(&content)?;
 
-    if !dry_run {
-        // TODO actually modify file instead of just printing frontmatter
-        bail!("non-dry-run not yet implemented");
+    if dry_run {
+        frontmatter::write(stdout(), fixed_metadata.as_ref(), content)?;
+    } else {
+        modify_file(path, fixed_metadata.as_ref(), content).context("couldn't modify file")?;
     }
 
+    Ok(())
+}
+
+fn modify_file(path: &str, metadata: Option<&yaml::Value>, content: &str) -> eyre::Result<()> {
+    let mut tmpfile = NamedTempFile::new()?;
+
+    frontmatter::write(&mut tmpfile, metadata, content)
+        .context("couldn't write fixed file to tempfile")?;
+    tmpfile
+        .persist(path)
+        .context("couldn't rename tempfile over original path")?;
     Ok(())
 }
 
